@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0A0A1F">
+<title>⭐ Star Quest</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⭐</text></svg>">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:#0A0A1F;color:#E0E0F0;min-height:100vh;min-height:100dvh;overflow-x:hidden}
+button{font-family:inherit;cursor:pointer;border:none;background:none;-webkit-tap-highlight-color:transparent}
+input{font-family:inherit}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.15)}}
+@keyframes celebrate{0%{transform:scale(0.8);opacity:0}50%{transform:scale(1.05)}100%{transform:scale(1);opacity:1}}
+@keyframes slideDown{0%{transform:translateY(-20px);opacity:0}100%{transform:translateY(0);opacity:1}}
+@keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+.c{max-width:480px;margin:0 auto;padding:12px 16px 100px}
+.toast{position:fixed;top:16px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:12px;font-size:14px;font-weight:700;z-index:999;animation:slideDown .3s ease;max-width:90vw;text-align:center}
+.inp{width:100%;padding:14px 16px;border-radius:12px;border:2px solid #2A2A4A;background:#0F0F28;color:#E0E0F0;font-size:15px;outline:none;transition:border .2s}
+.inp:focus{border-color:#6C63FF}
+.btn-p{width:100%;padding:16px;border-radius:14px;background:linear-gradient(135deg,#6C63FF,#FF6BCA);color:white;font-size:16px;font-weight:800;box-shadow:0 4px 20px #6C63FF44;transition:transform .15s}
+.btn-p:active{transform:scale(0.97)}
+.btn-s{width:100%;padding:14px;border-radius:12px;background:#1A1A35;color:#8B8FA3;font-size:14px;font-weight:700;border:1px solid #2A2A4A}
+.sync-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px}
+</style>
+</head>
+<body>
+<div class="c" id="app"><div style="min-height:100vh;display:flex;align-items:center;justify-content:center;color:#6C63FF;font-size:16px">Loading... ✨</div></div>
+<div id="toast-area"></div>
+<script>
+// ═══════════════════════════════════════════
+// CONFIG & CONSTANTS
+// ═══════════════════════════════════════════
+const LEVELS=[{n:"Starter",xp:0,e:"🌱"},{n:"Explorer",xp:100,e:"🔭"},{n:"Adventurer",xp:250,e:"🗺️"},{n:"Champion",xp:500,e:"⚔️"},{n:"Hero",xp:800,e:"🛡️"},{n:"Legend",xp:1200,e:"👑"},{n:"Star Keeper",xp:1800,e:"⭐"},{n:"Cosmic Master",xp:2500,e:"🌌"}];
+const TASKS={morning:[{l:"Wake up on time",xp:3},{l:"Make my bed",xp:3},{l:"Brush teeth & wash face",xp:3},{l:"Get dressed",xp:3},{l:"Breakfast — no screens",xp:5,s:"Word-of-the-day!"},{l:"Morning intention",xp:5,s:"One thing I'll try hard at"},{l:"5 min movement",xp:5,s:"Jumping jacks, stretches"},{l:"Backpack check → go!",xp:3}],
+afterSchool:[{l:"15 min outdoor play",xp:5,s:"Brain reset — no screens"},{l:"Homework (20–25 min)",xp:10,s:"Timer on. Do it yourself."},{l:"Movement break (10 min)",xp:5},{l:"Multiplication facts (10 min)",xp:8,s:"Update your galaxy!"},{l:"Khan Academy (15 min)",xp:10,s:"3rd grade math. You drive."},{l:"IXL practice (10–15 min)",xp:8,s:"Mon/Wed/Fri only",df:[1,3,5]},{l:"Reading (15 min)",xp:8,s:"Your choice 📖"},{l:"One household chore",xp:5}],
+evening:[{l:"Dinner together — no screens",xp:5},{l:"15 min connection time",xp:8,s:"Cards, jokes — NOT school"},{l:"Reflection journal",xp:10,s:"Hard / Learned / Proud"},{l:"Lay out clothes & pack bag",xp:5},{l:"Bedtime reading (15–20 min)",xp:8,s:"You shine here ✨"},{l:"Brush teeth",xp:3},{l:"No screens — wind down",xp:5},{l:"Lights out by 8:30 PM",xp:5,s:"Sleep = superpower 🧠"}]};
+const SM={morning:{l:"Morning Quest",e:"☀️",c:"#FF9F1C"},afterSchool:{l:"After School Quest",e:"📚",c:"#6C63FF"},evening:{l:"Evening Quest",e:"🌙",c:"#2EC4B6"}};
+const CFG_KEY="sq-config",LOCAL_KEY="sq-data-v1";
+const td=()=>new Date().toISOString().split("T")[0];
+const dw=()=>new Date().getDay();
+const gl=xp=>{let r=LEVELS[0];for(const l of LEVELS)if(xp>=l.xp)r=l;return r};
+const gn=xp=>{for(const l of LEVELS)if(xp<l.xp)return l;return null};
+
+let S=null,tab="today",cfg=null,syncStatus="idle",syncTimer=null;
+
+// ═══════════════════════════════════════════
+// FIREBASE CLOUD SYNC via REST API
+// ═══════════════════════════════════════════
+function getConfig(){try{const s=localStorage.getItem(CFG_KEY);return s?JSON.parse(s):null}catch(e){return null}}
+function saveConfig(c){cfg=c;try{localStorage.setItem(CFG_KEY,JSON.stringify(c))}catch(e){}}
+function fbUrl(){if(!cfg||!cfg.dbUrl||!cfg.code)return null;const base=cfg.dbUrl.replace(/\/$/,"");return base+"/families/"+encodeURIComponent(cfg.code)+".json"}
+
+async function cloudLoad(){
+  const url=fbUrl();if(!url)return null;
+  try{
+    const r=await fetch(url);
+    if(!r.ok)return null;
+    const d=await r.json();
+    return d;
+  }catch(e){console.error("Cloud load err",e);return null}
+}
+
+async function cloudSave(){
+  const url=fbUrl();if(!url||!S)return;
+  syncStatus="syncing";updSync();
+  try{
+    const r=await fetch(url,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(S)});
+    syncStatus=r.ok?"synced":"error";
+  }catch(e){syncStatus="error";console.error("Cloud save err",e)}
+  updSync();
+}
+
+function queueSync(){if(syncTimer)clearTimeout(syncTimer);syncTimer=setTimeout(()=>{localSave();cloudSave()},500)}
+function localSave(){if(!S)return;try{localStorage.setItem(LOCAL_KEY,JSON.stringify(S))}catch(e){}}
+function localLoad(){try{const s=localStorage.getItem(LOCAL_KEY);return s?JSON.parse(s):null}catch(e){return null}}
+
+function updSync(){
+  const el=document.getElementById("sync-ind");if(!el)return;
+  if(!cfg||!cfg.dbUrl){el.innerHTML='<span style="font-size:10px;color:#FF9800">⚙️ <a onclick="showSetup()" style="color:#FF9800;cursor:pointer;text-decoration:underline">Setup sync</a></span>';return}
+  const colors={syncing:"#6C63FF",synced:"#4CAF50",error:"#EF5350",idle:"#6B6B8D"};
+  const labels={syncing:"syncing...",synced:"synced ☁️",error:"offline",idle:"..."};
+  el.innerHTML='<span style="font-size:10px;color:'+colors[syncStatus]+'"><span class="sync-dot" style="background:'+colors[syncStatus]+'"></span>'+labels[syncStatus]+'</span>';
+}
+
+// ═══════════════════════════════════════════
+// STATE MANAGEMENT
+// ═══════════════════════════════════════════
+function fresh(){return{xp:0,streak:0,best:0,lastDate:null,totalDays:0,tasks:{},mult:{},v:6}}
+
+// Firebase converts arrays to objects — this converts them back
+function fixArr(obj,len){
+  if(!obj)return Array(len).fill(false);
+  if(Array.isArray(obj)){while(obj.length<len)obj.push(false);return obj}
+  // Object with numeric keys → convert to array
+  const arr=[];for(let i=0;i<len;i++)arr.push(obj[i]===true);
+  return arr;
+}
+function normalize(d){
+  if(!d||typeof d!=="object")return null;
+  if(d.xp===undefined&&d.xp!==0)return null;
+  // Fix tasks
+  if(!d.tasks)d.tasks={};
+  Object.keys(d.tasks).forEach(date=>{
+    const t=d.tasks[date];
+    if(!t){delete d.tasks[date];return}
+    t.morning=fixArr(t.morning,TASKS.morning.length);
+    t.afterSchool=fixArr(t.afterSchool,TASKS.afterSchool.length);
+    t.evening=fixArr(t.evening,TASKS.evening.length);
+  });
+  if(!d.mult)d.mult={};
+  if(!d.streak)d.streak=0;
+  if(!d.best)d.best=0;
+  if(!d.totalDays)d.totalDays=0;
+  if(!d.xp)d.xp=0;
+  return d;
+}
+
+function initDay(){const d=td();if(!S.tasks)S.tasks={};if(!S.tasks[d])S.tasks[d]={morning:TASKS.morning.map(()=>false),afterSchool:TASKS.afterSchool.map(()=>false),evening:TASKS.evening.map(()=>false)};if(S.lastDate&&S.lastDate!==d&&Math.floor((new Date(d)-new Date(S.lastDate))/864e5)>1)S.streak=0;const c=new Date();c.setDate(c.getDate()-30);Object.keys(S.tasks).forEach(k=>{if(new Date(k)<c)delete S.tasks[k]})}
+function toast(m,bg){document.getElementById("toast-area").innerHTML='<div class="toast" style="background:'+(bg||"#4CAF50")+';color:white;box-shadow:0 4px 20px '+(bg||"#4CAF50")+'66">'+m+'</div>';setTimeout(()=>{document.getElementById("toast-area").innerHTML=""},2500)}
+
+// ═══════════════════════════════════════════
+// SETUP SCREEN
+// ═══════════════════════════════════════════
+function showSetup(){
+  const existing=cfg||{};
+  document.getElementById("app").innerHTML=`
+  <div style="min-height:100vh;padding:40px 0">
+    <div style="text-align:center;margin-bottom:32px">
+      <div style="font-size:40px;margin-bottom:8px">⚙️</div>
+      <h1 style="font-size:22px;font-weight:800">Cloud Sync Setup</h1>
+      <p style="color:#8B8FA3;font-size:13px;margin-top:6px">One-time setup. Takes about 3 minutes.</p>
+    </div>
+
+    <div style="background:#0F0F28;border-radius:16px;padding:20px;margin-bottom:16px;border:1px solid #2A2A4A">
+      <div style="font-size:14px;font-weight:700;color:#6C63FF;margin-bottom:12px">Step 1: Create Firebase Project (free)</div>
+      <ol style="font-size:13px;color:#C0C0D0;line-height:2;padding-left:20px">
+        <li>Go to <strong style="color:#E0E0F0">console.firebase.google.com</strong></li>
+        <li>Click <strong style="color:#E0E0F0">"Create a project"</strong> → name it <strong style="color:#E0E0F0">"star-quest"</strong></li>
+        <li>Disable Google Analytics (not needed) → Create</li>
+        <li>In the left menu, click <strong style="color:#E0E0F0">"Build" → "Realtime Database"</strong></li>
+        <li>Click <strong style="color:#E0E0F0">"Create Database"</strong> → pick any location → <strong style="color:#E0E0F0">"Start in test mode"</strong></li>
+        <li>Copy the database URL from the top (looks like <em style="color:#8B8FA3">https://star-quest-xxxxx-default-rtdb.firebaseio.com</em>)</li>
+      </ol>
+    </div>
+
+    <div style="background:#0F0F28;border-radius:16px;padding:20px;margin-bottom:16px;border:1px solid #2A2A4A">
+      <div style="font-size:14px;font-weight:700;color:#6C63FF;margin-bottom:12px">Step 2: Paste your Firebase URL</div>
+      <input id="db-url" class="inp" placeholder="https://star-quest-xxxxx-default-rtdb.firebaseio.com" value="${existing.dbUrl||""}" style="margin-bottom:12px">
+      
+      <div style="font-size:14px;font-weight:700;color:#6C63FF;margin-bottom:8px;margin-top:16px">Step 3: Choose a family code</div>
+      <p style="font-size:12px;color:#8B8FA3;margin-bottom:8px">Any word or phrase. Use the same code on every device to stay in sync.</p>
+      <input id="fam-code" class="inp" placeholder="e.g. QUEST2026" value="${existing.code||""}" style="text-transform:uppercase">
+    </div>
+
+    <button onclick="doSetup()" class="btn-p" style="margin-bottom:12px">✅ Save & Connect</button>
+    <button onclick="skipSetup()" class="btn-s">Skip — use without cloud sync</button>
+    
+    <p style="color:#4A4A6A;font-size:11px;margin-top:16px;text-align:center">Without cloud sync, progress saves to this browser only.<br>You can set up sync anytime from the Stats tab.</p>
+  </div>`;
+}
+
+function doSetup(){
+  const url=(document.getElementById("db-url").value||"").trim();
+  const code=(document.getElementById("fam-code").value||"").trim().toUpperCase();
+  if(!url||!url.startsWith("https://")){toast("Please enter a valid Firebase URL","#EF5350");return}
+  if(!code||code.length<3){toast("Please enter a family code (3+ characters)","#EF5350");return}
+  saveConfig({dbUrl:url,code:code});
+  toast("☁️ Connected! Syncing across all devices.","#4CAF50");
+  init();
+}
+
+function skipSetup(){
+  saveConfig({dbUrl:"",code:""});
+  init();
+}
+
+// ═══════════════════════════════════════════
+// GAME LOGIC
+// ═══════════════════════════════════════════
+function togT(sec,idx){const d=td(),t=TASKS[sec][idx],was=S.tasks[d][sec][idx];S.tasks[d][sec][idx]=!was;if(!was){S.xp+=t.xp;if(S.tasks[d][sec].every(Boolean))S.xp+=10;const am=S.tasks[d].morning.every(Boolean),af=S.tasks[d].afterSchool.every((v,i)=>{const k=TASKS.afterSchool[i];return k.df&&!k.df.includes(dw())?true:v}),ev=S.tasks[d].evening.every(Boolean);if(am&&af&&ev&&S.lastDate!==d){S.xp+=25;S.totalDays++;const l=S.lastDate?new Date(S.lastDate):null,n=new Date(d);if(l&&Math.floor((n-l)/864e5)===1)S.streak++;else S.streak=1;S.best=Math.max(S.best,S.streak);S.lastDate=d}}else S.xp=Math.max(0,S.xp-t.xp);queueSync();render()}
+function togM(k){const c=S.mult[k]||0,n=(c+1)%3;if(n===2&&c!==2)S.xp+=2;if(c===2&&n!==2)S.xp=Math.max(0,S.xp-2);S.mult[k]=n;queueSync();render()}
+function resetAll(){if(confirm("Reset ALL progress? Cannot be undone.")){S=fresh();initDay();queueSync();render();toast("Reset.","#FF9800")}}
+
+// ═══════════════════════════════════════════
+// RENDER
+// ═══════════════════════════════════════════
+function sc(e,v,l,c){return'<div style="background:#1A1A35;border-radius:14px;padding:12px 10px;text-align:center;flex:1;border:1px solid '+c+'33"><div style="font-size:20px">'+e+'</div><div style="font-size:22px;font-weight:800;color:'+c+';line-height:1.2">'+v+'</div><div style="font-size:10px;color:#8B8FA3;margin-top:2px">'+l+'</div></div>'}
+function sr(e,l,v,c){return'<div style="display:flex;align-items:center;justify-content:space-between;background:#1A1A35;border-radius:12px;padding:12px 16px;border:1px solid #2A2A4A"><span style="font-size:14px;color:#C0C0D0">'+e+' '+l+'</span><span style="font-size:16px;font-weight:800;color:'+c+'">'+v+'</span></div>'}
+function tbn(k,l){const a=tab===k;return'<button onclick="tab=\''+k+'\';render()" style="flex:1;padding:10px 8px;border-radius:11px;background:'+(a?"#6C63FF":"transparent")+';color:'+(a?"white":"#6B6B8D")+';font-size:12px;font-weight:700">'+l+'</button>'}
+
+function secH(key,bools){const m=SM[key],tasks=TASKS[key],dn=bools.filter(Boolean).length,al=dn===bools.length;let h='<div style="background:#0F0F28;border-radius:18px;overflow:hidden;border:'+(al?"2px solid "+m.c:"1px solid #2A2A4A")+';box-shadow:'+(al?"0 0 20px "+m.c+"33":"none")+';margin-bottom:14px"><div style="padding:14px 18px;display:flex;align-items:center;justify-content:space-between;background:'+(al?m.c+"22":"#151535")+';border-bottom:1px solid #2A2A4A"><div style="display:flex;align-items:center;gap:10px"><span style="font-size:22px">'+m.e+'</span><div><div style="font-size:15px;font-weight:700;color:'+m.c+'">'+m.l+'</div><div style="font-size:11px;color:#6B6B8D">'+dn+'/'+bools.length+'</div></div></div>'+(al?'<div style="background:'+m.c+';color:white;font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px">COMPLETE ✨</div>':'')+'</div><div style="padding:10px 12px;display:flex;flex-direction:column;gap:6px">';
+tasks.forEach((t,i)=>{const d=bools[i],fl=t.df&&!t.df.includes(dw()),ds=fl&&!d;h+='<button onclick="'+(ds?"":"togT('"+key+"',"+i+")")+'" style="display:flex;align-items:flex-start;gap:12px;padding:10px 14px;background:'+(d?"#1A2A1A":"#13132B")+';border:'+(d?"1px solid #2D5A2D":"1px solid #2A2A4A")+';border-radius:12px;width:100%;opacity:'+(ds?.4:1)+';cursor:'+(ds?"default":"pointer")+'"><div style="width:24px;height:24px;border-radius:7px;flex-shrink:0;background:'+(d?"linear-gradient(135deg,#4CAF50,#66BB6A)":"#2A2A4A")+';border:'+(d?"none":"2px solid #4A4A6A")+';display:flex;align-items:center;justify-content:center;font-size:14px;color:white;box-shadow:'+(d?"0 0 10px #4CAF5066":"none")+'">'+(d?"✓":"")+'</div><div style="flex:1;text-align:left"><div style="font-size:14px;font-weight:600;color:'+(d?"#66BB6A":"#E0E0F0")+';text-decoration:'+(d?"line-through":"none")+'">'+t.l+'</div>'+(t.s?'<div style="font-size:11px;color:#6B6B8D;margin-top:2px">'+t.s+'</div>':'')+'</div><div style="font-size:11px;font-weight:700;padding:3px 8px;border-radius:8px;background:'+(d?"#2D5A2D":"#2A2A4A")+';color:'+(d?"#66BB6A":"#6C63FF")+';flex-shrink:0;margin-top:2px">+'+t.xp+' ⭐</div></button>'});return h+'</div></div>'}
+
+function mTbl(){const ns=[1,2,3,4,5,6,7,8,9,10,11,12],lb=["","🟡","🟢"];let h='<table style="border-collapse:collapse;margin:0 auto;min-width:420px"><thead><tr><th style="width:32px;height:32px;background:#6C63FF;color:white;font-size:12px;font-weight:800">×</th>';ns.forEach(n=>{h+='<th style="width:32px;height:32px;background:#6C63FF;color:white;font-size:11px;font-weight:700">'+n+'</th>'});h+='</tr></thead><tbody>';ns.forEach(r=>{h+='<tr><td style="background:#6C63FF;color:white;text-align:center;font-size:11px;font-weight:700;width:32px;height:32px">'+r+'</td>';ns.forEach(c=>{const k=r+"-"+c,v=S.mult[k]||0,ez=r===1||c===1||r===10||c===10;let bg=v===2?"#1B3A1B":v===1?"#3A2A0A":ez?"#1A2A1A":"#13132B",bd=v===2?"#4CAF50":v===1?"#FF9800":"#2A2A4A",cl=v===2?"#66BB6A":v===1?"#FFB74D":"#4A4A6A";h+='<td onclick="togM(\''+k+'\')" style="width:32px;height:32px;text-align:center;cursor:pointer;background:'+bg+';border:1px solid '+bd+';font-size:'+(v?12:10)+'px;font-weight:600;color:'+cl+'">'+(v?lb[v]:r*c)+'</td>'});h+='</tr>'});return h+'</tbody></table>'}
+
+function render(){
+if(!S)return;
+try{
+const d=td();
+// Ensure today's tasks are proper arrays
+if(!S.tasks)S.tasks={};
+if(!S.tasks[d])S.tasks[d]={morning:TASKS.morning.map(()=>false),afterSchool:TASKS.afterSchool.map(()=>false),evening:TASKS.evening.map(()=>false)};
+const t=S.tasks[d];
+t.morning=fixArr(t.morning,TASKS.morning.length);
+t.afterSchool=fixArr(t.afterSchool,TASKS.afterSchool.length);
+t.evening=fixArr(t.evening,TASKS.evening.length);
+const lv=gl(S.xp||0),nx=gn(S.xp||0),pc=nx?((S.xp-lv.xp)/(nx.xp-lv.xp))*100:100,dn=[...t.morning,...t.afterSchool,...t.evening].filter(Boolean).length,tot=t.morning.length+t.afterSchool.length+t.evening.length,dl=new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"}),ms=Object.values(S.mult||{}).filter(v=>v===2).length,ln=Object.values(S.mult||{}).filter(v=>v===1).length;
+
+let h='<div style="background:linear-gradient(135deg,#1A1045,#0F0F28);border-radius:22px;padding:22px 20px 18px;margin-bottom:14px;border:1px solid #2A2A5A;box-shadow:0 8px 32px rgba(108,99,255,.15)"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><div><div style="font-size:11px;color:#8B8FA3;text-transform:uppercase;letter-spacing:1px">'+dl+'</div><div style="font-size:22px;font-weight:800;margin-top:2px"><span style="animation:pulse 2s infinite;display:inline-block">'+lv.e+'</span> Star Quest</div></div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px"><div style="background:linear-gradient(135deg,#6C63FF,#FF6BCA);border-radius:14px;padding:8px 14px;text-align:center"><div style="font-size:20px;font-weight:800;line-height:1">'+S.xp+'</div><div style="font-size:9px;font-weight:600;opacity:.9">TOTAL XP</div></div><div id="sync-ind"></div></div></div>';
+h+='<div style="display:flex;justify-content:space-between;font-size:11px;color:#8B8FA3;margin-bottom:4px"><span>'+lv.e+' '+lv.n+'</span><span>'+(nx?(nx.xp-S.xp)+' XP to '+nx.n:"MAX!")+'</span></div><div style="width:100%;height:10px;background:#1E1E3A;border-radius:5px;overflow:hidden"><div style="width:'+pc+'%;height:100%;border-radius:5px;background:linear-gradient(90deg,#6C63FF,#FF6BCA);transition:width .6s;box-shadow:0 0 12px #6C63FF88"></div></div>';
+h+='<div style="display:flex;gap:8px;margin-top:14px">'+sc("🔥",S.streak,"Day Streak","#FF6B6B")+sc("📅",S.totalDays,"Days Done","#6C63FF")+sc("⭐",dn+"/"+tot,"Today","#FFD54F")+'</div></div>';
+
+h+='<div style="display:flex;gap:6px;margin-bottom:14px;background:#0F0F28;border-radius:14px;padding:4px;border:1px solid #2A2A4A">'+tbn("today","⚡ Today")+tbn("galaxy","🌌 Galaxy")+tbn("stats","📊 Stats")+'</div>';
+
+if(tab==="today"){
+  if(dn===tot&&tot>0)h+='<div style="background:linear-gradient(135deg,#1B3A1B,#0F2A0F);border:2px solid #4CAF50;border-radius:16px;padding:16px 20px;text-align:center;margin-bottom:14px;box-shadow:0 0 30px #4CAF5033;animation:celebrate .5s ease"><div style="font-size:32px">🎉</div><div style="font-size:16px;font-weight:800;color:#66BB6A">ALL QUESTS COMPLETE!</div><div style="font-size:12px;color:#81C784">+25 XP daily bonus!</div></div>';
+  h+=secH("morning",t.morning)+secH("afterSchool",t.afterSchool)+secH("evening",t.evening);
+}else if(tab==="galaxy"){
+  h+='<div style="background:#0F0F28;border-radius:18px;padding:18px 14px;border:1px solid #2A2A4A"><div style="text-align:center;margin-bottom:14px"><div style="font-size:28px">🌌</div><div style="font-size:18px;font-weight:800">Multiplication Galaxy</div><div style="font-size:12px;color:#8B8FA3">Light up every star!</div></div><div style="display:flex;gap:12px;margin-bottom:16px;justify-content:center;flex-wrap:wrap">'+sc("🟢",ms,"Mastered","#4CAF50")+sc("🟡",ln,"Learning","#FF9800")+sc("⬜",144-ms-ln,"Not Yet","#6B6B8D")+'</div><div style="font-size:12px;color:#8B8FA3;text-align:center;margin-bottom:10px">Tap: blank → 🟡 → 🟢 → blank</div><div style="overflow-x:auto;-webkit-overflow-scrolling:touch">'+mTbl()+'</div><div style="margin-top:16px;background:#1A1A35;border-radius:12px;padding:12px 16px;display:flex;align-items:center;gap:10px"><div style="font-size:24px">🌌</div><div><div style="font-size:13px;font-weight:700">Galaxy: '+Math.round(ms/144*100)+'%</div><div style="width:200px;height:8px;background:#2A2A4A;border-radius:4px;overflow:hidden;margin-top:4px"><div style="width:'+(ms/144)*100+'%;height:100%;border-radius:4px;background:linear-gradient(90deg,#4CAF50,#66BB6A)"></div></div></div></div></div>';
+}else{
+  h+='<div style="background:#0F0F28;border-radius:18px;padding:20px 18px;border:1px solid #2A2A4A"><div style="text-align:center;margin-bottom:20px"><div style="font-size:40px">'+lv.e+'</div><div style="font-size:22px;font-weight:800;margin-top:4px">'+lv.n+'</div><div style="font-size:14px;color:#8B8FA3">'+S.xp+' XP</div></div><div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">'+sr("🔥","Current Streak",S.streak+" days","#FF6B6B")+sr("🏆","Best Streak",S.best+" days","#FFD54F")+sr("📅","Days Completed",""+S.totalDays,"#6C63FF")+sr("🌌","Facts Mastered",ms+"/144","#4CAF50")+'</div>';
+  h+='<div style="font-size:14px;font-weight:700;color:#8B8FA3;margin-bottom:12px;text-align:center">Level Map</div>'+LEVELS.map(l=>{const r=S.xp>=l.xp;return'<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;opacity:'+(r?1:.4)+'"><span style="font-size:18px">'+l.e+'</span><span style="font-size:13px;font-weight:600;color:'+(r?"#E0E0F0":"#4A4A6A")+';flex:1">'+l.n+'</span><span style="font-size:11px;color:#6B6B8D">'+l.xp+'</span>'+(r?'<span style="color:#4CAF50">✓</span>':'')+'</div>'}).join('');
+  // Cloud sync settings
+  h+='<div style="margin-top:24px;padding-top:16px;border-top:1px solid #2A2A4A"><div style="font-size:14px;font-weight:700;color:#8B8FA3;margin-bottom:12px;text-align:center">Cloud Sync</div>';
+  if(cfg&&cfg.dbUrl){h+='<div style="background:#1B3A1B;border-radius:10px;padding:10px 14px;font-size:12px;color:#66BB6A;margin-bottom:8px">☁️ Connected · Family code: <strong>'+cfg.code+'</strong></div><button onclick="showSetup()" class="btn-s" style="font-size:12px;padding:10px">⚙️ Change sync settings</button>'}
+  else{h+='<div style="background:#3A2A0A;border-radius:10px;padding:10px 14px;font-size:12px;color:#FFB74D;margin-bottom:8px">⚠️ Not connected — progress only saved to this browser</div><button onclick="showSetup()" class="btn-s" style="font-size:12px;padding:10px">☁️ Set up cloud sync</button>'}
+  h+='</div><button onclick="resetAll()" style="width:100%;padding:10px;border-radius:10px;border:1px solid #3A1A1A;background:#1A0A0A;color:#EF5350;font-size:12px;font-weight:600;margin-top:16px">Reset All Progress</button></div>';
+}
+document.getElementById("app").innerHTML=h;setTimeout(updSync,50)
+}catch(e){console.error("Render error:",e);document.getElementById("app").innerHTML='<div style="padding:40px;text-align:center"><div style="font-size:32px;margin-bottom:12px">⚠️</div><div style="font-size:16px;font-weight:700;margin-bottom:8px">Something went wrong</div><div style="font-size:13px;color:#EF5350;margin-bottom:16px">'+e.message+'</div><button onclick="S=fresh();initDay();queueSync();render()" class="btn-p" style="max-width:300px;margin:0 auto">🔄 Reset & Reload</button></div>'}}
+
+// ═══════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════
+async function init(){
+  cfg=getConfig();
+  if(!cfg){showSetup();return}
+  
+  // Try cloud first, then local
+  let data=null;
+  if(cfg.dbUrl){
+    try{data=await cloudLoad()}catch(e){console.error("Cloud load failed",e)}
+  }
+  if(data)data=normalize(data);
+  if(!data){
+    const local=localLoad();
+    if(local)data=normalize(local);
+  }
+  
+  if(data){
+    S=data;initDay();localSave();
+    if(cfg.dbUrl)cloudSave();
+    render();
+  }else{
+    S=fresh();initDay();queueSync();
+    toast("🚀 Quest started!","#6C63FF");
+    render();
+  }
+}
+
+init();
+</script>
+</body>
+</html>
